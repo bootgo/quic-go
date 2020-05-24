@@ -214,6 +214,7 @@ var _ = Describe("Tracer", func() {
 			Expect(entry.Name).To(Equal("parameters_set"))
 			ev := entry.Event
 			Expect(ev).To(HaveKeyWithValue("owner", "remote"))
+			Expect(ev).ToNot(HaveKey("original_destination_connection_id"))
 		})
 
 		It("records a sent packet, without an ACK", func() {
