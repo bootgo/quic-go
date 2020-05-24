@@ -1626,7 +1626,8 @@ var _ = Describe("Session", func() {
 				InitialMaxData:                0x5000,
 				ActiveConnectionIDLimit:       3,
 				// marshaling always sets it to this value
-				MaxUDPPayloadSize: protocol.MaxReceivePacketSize,
+				MaxUDPPayloadSize:         protocol.MaxReceivePacketSize,
+				InitialSourceConnectionID: destConnID,
 			}
 			streamManager.EXPECT().UpdateLimits(params)
 			packer.EXPECT().HandleTransportParameters(params)
@@ -1645,7 +1646,10 @@ var _ = Describe("Session", func() {
 			streamManager.EXPECT().UpdateLimits(gomock.Any())
 			packer.EXPECT().HandleTransportParameters(gomock.Any())
 			qlogger.EXPECT().ReceivedTransportParameters(gomock.Any())
-			sess.processTransportParameters(&wire.TransportParameters{MaxIdleTimeout: t})
+			sess.processTransportParameters(&wire.TransportParameters{
+				MaxIdleTimeout:            t,
+				InitialSourceConnectionID: destConnID,
+			})
 		}
 
 		runSession := func() {
@@ -2173,6 +2177,7 @@ var _ = Describe("Client Session", func() {
 		It("uses the preferred_address connection ID", func() {
 			params := &wire.TransportParameters{
 				OriginalDestinationConnectionID: destConnID,
+				InitialSourceConnectionID:       destConnID,
 				PreferredAddress: &wire.PreferredAddress{
 					IPv4:                net.IPv4(127, 0, 0, 1),
 					IPv6:                net.IP{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
@@ -2198,6 +2203,7 @@ var _ = Describe("Client Session", func() {
 			sess.config.MaxIdleTimeout = 19 * time.Second
 			params := &wire.TransportParameters{
 				OriginalDestinationConnectionID: destConnID,
+				InitialSourceConnectionID:       destConnID,
 				MaxIdleTimeout:                  18 * time.Second,
 			}
 			packer.EXPECT().HandleTransportParameters(gomock.Any())
@@ -2206,10 +2212,24 @@ var _ = Describe("Client Session", func() {
 			Expect(sess.idleTimeout).To(Equal(18 * time.Second))
 		})
 
+		It("errors if the TransportParameters contain a wrong initial_source_connection_id", func() {
+			sess.handshakeDestConnID = protocol.ConnectionID{0xde, 0xad, 0xbe, 0xef}
+			params := &wire.TransportParameters{
+				OriginalDestinationConnectionID: destConnID,
+				InitialSourceConnectionID:       protocol.ConnectionID{0xde, 0xca, 0xfb, 0xad},
+				StatelessResetToken:             &[16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
+			}
+			expectClose()
+			qlogger.EXPECT().ReceivedTransportParameters(params)
+			sess.processTransportParameters(params)
+			Eventually(errChan).Should(Receive(MatchError("TRANSPORT_PARAMETER_ERROR: expected initial_source_connection_id to equal 0xdeadbeef, is 0xdecafbad")))
+		})
+
 		It("errors if the TransportParameters contain a wrong original_destination_connection_id", func() {
 			sess.origDestConnID = protocol.ConnectionID{0xde, 0xad, 0xbe, 0xef}
 			params := &wire.TransportParameters{
 				OriginalDestinationConnectionID: protocol.ConnectionID{0xde, 0xca, 0xfb, 0xad},
+				InitialSourceConnectionID:       sess.handshakeDestConnID,
 				StatelessResetToken:             &[16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
 			}
 			expectClose()
